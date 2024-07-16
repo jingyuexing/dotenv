@@ -1,9 +1,9 @@
 """本模块用于.env解析"""
 
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Union
 from enum import Enum
 import json
-
+import os
 
 class Token(Enum):
     EQUAL = "="
@@ -79,9 +79,11 @@ class DotENV:
     current: int = 0
     maxLength: int = 0
     env: Dict[str, Any] = {}
+    delimiter = "_"
     tokens: List[EnvToken] = []
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str,delimiter="_") -> None:
+        self.delimiter = delimiter
         self.__parser__(self.__tokenize__(text))
 
     def __tokenize__(self, text: str):
@@ -271,14 +273,24 @@ class DotENV:
     def __str__(self) -> str:
         text = []
         for key in self.env:
-            text.append(
-                "=".join(
-                    [
-                        key,
-                        self.env.get(key),  # type: ignore
-                    ]
+            if isinstance(self.env[key],dict):
+                temp = {}
+                temp[key] = self.env[key]
+                self.flatten_nested_dict(temp)
+                for flatten_key in temp:
+                    text.append("=".join([
+                        flatten_key,
+                        temp[flatten_key]
+                    ]))
+            else:
+                text.append(
+                    "=".join(
+                        [
+                            key,
+                            self.env.get(key),  # type: ignore
+                        ]
+                    )
                 )
-            )
         return "\n".join(text)
 
     def __getitem__(self, name: str) -> Any:
@@ -286,21 +298,31 @@ class DotENV:
 
     def __setitem__(self, name: str, value: Any) -> None:
         self.env[name] = value
-
-
-if __name__ == "__main__":
-    dotenv = DotENV("""
-name=12
-name2="hello"
-name3=["hello","angle"]
-name5=`
-this
-is
-multi
-line
-`
-name4={
-    "name":"this is a simple"
-}
-    """)
-    print(dotenv["name5"])
+    
+    def __nest__(self,key,value):
+        keys = key.split(self.delimiter)
+        nested_obj = current_level = {}
+        for key_ in keys[:-1]:
+            current_level[key_] = {}
+            current_level = current_level[key_]
+        current_level[keys[-1]] = value
+        return nested_obj
+    
+    def flatten_nested_dict(self,obj:Union[Dict[str,Any],List[Any]], parent_key='')->Dict[str,str]:
+        items = []
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                new_key = f'{parent_key}{self.delimiter}{k}' if parent_key else k
+                items.extend(self.flatten_nested_dict(v, new_key).items())
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                new_key = f'{parent_key}{self.delimiter}{i}' if parent_key else str(i)
+                items.extend(self.flatten_nested_dict(v, new_key).items())
+        else:
+            items.append((parent_key, obj))
+        return dict(items)
+    
+    def environment(self):
+        env = self.flatten_nested_dict(self.env)
+        for key in env:
+            os.environ[key] = env[key]
